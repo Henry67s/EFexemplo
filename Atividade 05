@@ -1,0 +1,407 @@
+using System.ComponentModel.DataAnnotations;
+
+namespace EFexemplo.Models
+{
+    public class Categoria
+    {
+        public Guid CategoriaId { get; set; }
+
+        [Required]
+        [Display(Name = "Nome da categoria")]
+        public string Nome { get; set; } = string.Empty;
+
+        public ICollection<Produto> Produtos { get; set; }
+            = new List<Produto>();
+    }
+}
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace EFexemplo.Models
+{
+    public class Produto
+    {
+        public Guid ProdutoId { get; set; }
+
+        [Required]
+        [Display(Name = "Nome")]
+        public string Nome { get; set; } = string.Empty;
+
+        [Display(Name = "Descrição")]
+        public string? Descricao { get; set; }
+
+        [Column(TypeName = "decimal(18,2)")]
+        [Range(0.01, 999999999)]
+        [Display(Name = "Preço")]
+        public decimal Preco { get; set; }
+
+        [Display(Name = "Categoria")]
+        public Guid CategoriaId { get; set; }
+
+        public Categoria? Categoria { get; set; }
+    }
+}
+using EFexemplo.Models;
+using Microsoft.EntityFrameworkCore;
+
+namespace EFexemplo.Data
+{
+    public class Context : DbContext
+    {
+        public Context(DbContextOptions<Context> options)
+            : base(options)
+        {
+        }
+
+        public DbSet<Cliente> Clientes { get; set; }
+        public DbSet<Categoria> Categorias { get; set; }
+        public DbSet<Produto> Produtos { get; set; }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+
+            modelBuilder.Entity<Cliente>().ToTable("tbClientes");
+            modelBuilder.Entity<Categoria>().ToTable("tbCategorias");
+            modelBuilder.Entity<Produto>().ToTable("tbProdutos");
+
+            modelBuilder.Entity<Produto>()
+                .HasOne(p => p.Categoria)
+                .WithMany(c => c.Produtos)
+                .HasForeignKey(p => p.CategoriaId)
+                .OnDelete(DeleteBehavior.Restrict);
+        }
+    }
+}
+using EFexemplo.Data;
+using EFexemplo.Models;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace EFexemplo.Controllers
+{
+    public class CategoriasController : Controller
+    {
+        private readonly Context _context;
+
+        public CategoriasController(Context context)
+        {
+            _context = context;
+        }
+
+        public async Task<IActionResult> Index()
+        {
+            return View(await _context.Categorias.ToListAsync());
+        }
+
+        public async Task<IActionResult> Details(Guid? id)
+        {
+            if (id == null) return NotFound();
+
+            var categoria = await _context.Categorias
+                .FirstOrDefaultAsync(c => c.CategoriaId == id);
+
+            if (categoria == null) return NotFound();
+
+            return View(categoria);
+        }
+
+        public IActionResult Create() => View();
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Create(Categoria categoria)
+        {
+            if (!ModelState.IsValid) return View(categoria);
+
+            categoria.CategoriaId = Guid.NewGuid();
+            _context.Add(categoria);
+            await _context.SaveChangesAsync();
+
+            return RedirectToAction(nameof(Index));
+        }
+
+        public async Task<IActionResult> Edit(Guid? id)
+        {
+            if (id == null) return NotFound();
+
+            var categoria = await _context.Categorias.FindAsync(id);
+
+            if (categoria == null) return NotFound();
+
+            return View(categoria);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Edit(
+            Guid id, Categoria categoria)
+        {
+            if (id != categoria.CategoriaId) return NotFound();
+
+            if (!ModelState.IsValid) return View(categoria);
+
+            _context.Update(categoria);
+            await _context.SaveChangesAsync();
+
+            return RedirectToAction(nameof(Index));
+        }
+
+        public async Task<IActionResult> Delete(Guid? id)
+        {
+            if (id == null) return NotFound();
+
+            var categoria = await _context.Categorias
+                .FirstOrDefaultAsync(c => c.CategoriaId == id);
+
+            if (categoria == null) return NotFound();
+
+            return View(categoria);
+        }
+
+        [HttpPost, ActionName("Delete")]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteConfirmed(Guid id)
+        {
+            var categoria = await _context.Categorias
+                .Include(c => c.Produtos)
+                .FirstOrDefaultAsync(c => c.CategoriaId == id);
+
+            if (categoria == null)
+                return RedirectToAction(nameof(Index));
+
+            if (categoria.Produtos.Any())
+            {
+                ModelState.AddModelError(
+                    string.Empty,
+                    "Exclua os produtos desta categoria antes de excluí-la.");
+
+                return View("Delete", categoria);
+            }
+
+            _context.Categorias.Remove(categoria);
+            await _context.SaveChangesAsync();
+
+            return RedirectToAction(nameof(Index));
+        }
+    }
+}
+using EFexemplo.Data;
+using EFexemplo.Models;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.EntityFrameworkCore;
+
+namespace EFexemplo.Controllers
+{
+    public class ProdutosController : Controller
+    {
+        private readonly Context _context;
+
+        public ProdutosController(Context context)
+        {
+            _context = context;
+        }
+
+        private async Task CarregarCategorias(object? selecionada = null)
+        {
+            ViewData["CategoriaId"] = new SelectList(
+                await _context.Categorias.ToListAsync(),
+                "CategoriaId",
+                "Nome",
+                selecionada);
+        }
+
+        public async Task<IActionResult> Index()
+        {
+            var produtos = _context.Produtos
+                .Include(p => p.Categoria);
+
+            return View(await produtos.ToListAsync());
+        }
+
+        public async Task<IActionResult> Details(Guid? id)
+        {
+            if (id == null) return NotFound();
+
+            var produto = await _context.Produtos
+                .Include(p => p.Categoria)
+                .FirstOrDefaultAsync(p => p.ProdutoId == id);
+
+            if (produto == null) return NotFound();
+
+            return View(produto);
+        }
+
+        public async Task<IActionResult> Create()
+        {
+            await CarregarCategorias();
+            return View();
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Create(Produto produto)
+        {
+            if (!ModelState.IsValid)
+            {
+                await CarregarCategorias(produto.CategoriaId);
+                return View(produto);
+            }
+
+            produto.ProdutoId = Guid.NewGuid();
+            _context.Add(produto);
+            await _context.SaveChangesAsync();
+
+            return RedirectToAction(nameof(Index));
+        }
+
+        public async Task<IActionResult> Edit(Guid? id)
+        {
+            if (id == null) return NotFound();
+
+            var produto = await _context.Produtos.FindAsync(id);
+
+            if (produto == null) return NotFound();
+
+            await CarregarCategorias(produto.CategoriaId);
+            return View(produto);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Edit(
+            Guid id, Produto produto)
+        {
+            if (id != produto.ProdutoId) return NotFound();
+
+            if (!ModelState.IsValid)
+            {
+                await CarregarCategorias(produto.CategoriaId);
+                return View(produto);
+            }
+
+            _context.Update(produto);
+            await _context.SaveChangesAsync();
+
+            return RedirectToAction(nameof(Index));
+        }
+
+        public async Task<IActionResult> Delete(Guid? id)
+        {
+            if (id == null) return NotFound();
+
+            var produto = await _context.Produtos
+                .Include(p => p.Categoria)
+                .FirstOrDefaultAsync(p => p.ProdutoId == id);
+
+            if (produto == null) return NotFound();
+
+            return View(produto);
+        }
+
+        [HttpPost, ActionName("Delete")]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteConfirmed(Guid id)
+        {
+            var produto = await _context.Produtos.FindAsync(id);
+
+            if (produto != null)
+            {
+                _context.Produtos.Remove(produto);
+                await _context.SaveChangesAsync();
+            }
+
+            return RedirectToAction(nameof(Index));
+        }
+    }
+}
+@model IEnumerable<EFexemplo.Models.Categoria>
+
+<h1>Categorias</h1>
+
+<p>
+    <a asp-action="Create" class="btn btn-primary">Nova Categoria</a>
+</p>
+
+<table class="table">
+    <thead>
+        <tr>
+            <th>Nome</th>
+            <th>Ações</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var item in Model)
+        {
+            <tr>
+                <td>@item.Nome</td>
+                <td>
+                    <a asp-action="Edit" asp-route-id="@item.CategoriaId">Editar</a> |
+                    <a asp-action="Details" asp-route-id="@item.CategoriaId">Detalhes</a> |
+                    <a asp-action="Delete" asp-route-id="@item.CategoriaId">Excluir</a>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+@model IEnumerable<EFexemplo.Models.Produto>
+
+<h1>Produtos</h1>
+
+<p>
+    <a asp-action="Create" class="btn btn-primary">Novo Produto</a>
+</p>
+
+<table class="table">
+    <thead>
+        <tr>
+            <th>Nome</th>
+            <th>Descrição</th>
+            <th>Preço</th>
+            <th>Categoria</th>
+            <th>Ações</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var item in Model)
+        {
+            <tr>
+                <td>@item.Nome</td>
+                <td>@item.Descricao</td>
+                <td>@item.Preco.ToString("C")</td>
+                <td>@(item.Categoria?.Nome ?? "Sem categoria")</td>
+                <td>
+                    <a asp-action="Edit" asp-route-id="@item.ProdutoId">Editar</a> |
+                    <a asp-action="Details" asp-route-id="@item.ProdutoId">Detalhes</a> |
+                    <a asp-action="Delete" asp-route-id="@item.ProdutoId">Excluir</a>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+<div class="form-group">
+    <label asp-for="CategoriaId" class="control-label"></label>
+    <select asp-for="CategoriaId"
+            class="form-control"
+            asp-items="ViewBag.CategoriaId">
+        <option value="">Selecione uma categoria</option>
+    </select>
+    <span asp-validation-for="CategoriaId"
+          class="text-danger"></span>
+</div>
+<li class="nav-item">
+    <a class="nav-link text-dark"
+       asp-controller="Clientes"
+       asp-action="Index">Clientes</a>
+</li>
+<li class="nav-item">
+    <a class="nav-link text-dark"
+       asp-controller="Categorias"
+       asp-action="Index">Categorias</a>
+</li>
+<li class="nav-item">
+    <a class="nav-link text-dark"
+       asp-controller="Produtos"
+       asp-action="Index">Produtos</a>
+</li>
